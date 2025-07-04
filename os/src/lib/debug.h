@@ -37,3 +37,8 @@ void debug_backtrace_all (void);
 #define ASSERT(CONDITION) ((void) 0)
 #define NOT_REACHED() for (;;)
 #endif /* lib/debug.h */
+
+
+/*DonP sign*/
+#define DEBUG(...) printf(">>>>> [DB]: " __VA_ARGS__)
+

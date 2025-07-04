@@ -61,8 +61,7 @@ void intr_handler (struct intr_frame *args);
 static void unexpected_interrupt (const struct intr_frame *);
 
 /* Returns the current interrupt status. */
-enum intr_level
-intr_get_level (void) 
+enum intr_level intr_get_level (void) 
 {
   uint32_t flags;
 
@@ -77,15 +76,13 @@ intr_get_level (void)
 
 /* Enables or disables interrupts as specified by LEVEL and
    returns the previous interrupt status. */
-enum intr_level
-intr_set_level (enum intr_level level) 
+enum intr_level intr_set_level (enum intr_level level) 
 {
   return level == INTR_ON ? intr_enable () : intr_disable ();
 }
 
 /* Enables interrupts and returns the previous interrupt status. */
-enum intr_level
-intr_enable (void) 
+enum intr_level intr_enable (void) 
 {
   enum intr_level old_level = intr_get_level ();
   ASSERT (!intr_context ());
@@ -100,8 +97,7 @@ intr_enable (void)
 }
 
 /* Disables interrupts and returns the previous interrupt status. */
-enum intr_level
-intr_disable (void) 
+enum intr_level intr_disable (void) 
 {
   enum intr_level old_level = intr_get_level ();
 
@@ -114,8 +110,7 @@ intr_disable (void)
 }
 
 /* Initializes the interrupt system. */
-void
-intr_init (void)
+void intr_init (void)
 {
   uint64_t idtr_operand;
   int i;
@@ -161,8 +156,7 @@ intr_init (void)
    privilege level DPL.  Names the interrupt NAME for debugging
    purposes.  The interrupt handler will be invoked with
    interrupt status set to LEVEL. */
-static void
-register_handler (uint8_t vec_no, int dpl, enum intr_level level,
+static void register_handler (uint8_t vec_no, int dpl, enum intr_level level,
                   intr_handler_func *handler, const char *name)
 {
   ASSERT (intr_handlers[vec_no] == NULL);
