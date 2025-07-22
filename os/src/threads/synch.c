@@ -65,14 +65,36 @@ sema_down (struct semaphore *sema)
   ASSERT (sema != NULL);
   ASSERT (!intr_context ());
 
-  old_level = intr_disable ();
-  while (sema->value == 0) 
-    {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
-      thread_block ();
+  // old_level = intr_disable ();
+  // while (sema->value == 0) 
+  //   {
+  //     list_push_back (&sema->waiters, &thread_current ()->elem);
+  //     thread_block ();
+  //   }
+  // sema->value--;
+  // intr_set_level (old_level);
+
+  /*DonP sign*/
+  struct thread* cur = thread_current();
+  struct list_elem *e = NULL;
+  //enter critical section
+  old_level = intr_disable();
+  while(sema->value == 0){
+    //put the thread into sorted queue with priority from high to low
+    for(e = list_begin(&sema->waiters); e != list_end(&sema->waiters); e = list_next(e)){
+      struct thread* _thread = list_entry(e, struct thread, elem);
+      //find the position based on effective priority
+      if(cur->priority > _thread->priority){
+        break;
+      }
     }
+    //insert cur before e
+    list_insert(e, &cur->elem);
+    thread_block();
+  }
   sema->value--;
-  intr_set_level (old_level);
+  //leave critical section
+  intr_set_level(old_level);
 }
 
 /* Down or "P" operation on a semaphore, but only if the
@@ -118,6 +140,10 @@ sema_up (struct semaphore *sema)
                                 struct thread, elem));
   sema->value++;
   intr_set_level (old_level);
+
+  /*DonP sign*/
+  //doesn't wait for tick interrupt but yield imediately since the lower priority thread can take the lock before tick interrupt occur (every 4 ticks) 
+  thread_yield();
 }
 
 static void sema_test_helper (void *sema_);
@@ -196,8 +222,26 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  // sema_down (&lock->semaphore);
+  // lock->holder = thread_current ();
+
+  /*DonP sign*/
+  struct thread* cur = thread_current ();
+  //enter critical section
+  enum intr_level old_level = intr_disable();
+  //handle inheritance priority / donation priority  
+  if(lock->holder && (cur->priority > lock->holder->priority)){
+    struct thread *holder = lock->holder;
+    holder->priority = cur->priority;  //donate the priority
+  }
+  //release critical section
+  intr_set_level(old_level);
+  //take the lock or blocked
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+
+  //cross reference
+  //we got the lock at this time (if thread isn't blocked or takes the lock successful)
+  lock->holder = cur;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -231,8 +275,13 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  /*DonP sign*/
+
   lock->holder = NULL;
-  sema_up (&lock->semaphore);
+  struct thread* cur = thread_current();
+  cur->priority = cur->base_priority;
+  //actually give up the lock and allow preemption
+  sema_up(&lock->semaphore);
 }
 
 /* Returns true if the current thread holds LOCK, false

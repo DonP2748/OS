@@ -112,7 +112,6 @@ thread_start (void)
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
-
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down (&idle_started);
 }
@@ -201,6 +200,9 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /*DonP sign*/
+  thread_yield();
+
   return tid;
 }
 
@@ -231,15 +233,39 @@ thread_block (void)
 void
 thread_unblock (struct thread *t) 
 {
+  // enum intr_level old_level;
+
+  // ASSERT (is_thread (t));
+
+  // old_level = intr_disable ();
+  // ASSERT (t->status == THREAD_BLOCKED);
+  // list_push_back (&ready_list, &t->elem);
+  // t->status = THREAD_READY;
+  // intr_set_level (old_level);
+
+  /*DonP sign*/
+
   enum intr_level old_level;
+  struct list_elem* e = NULL;
+  struct thread* cur = thread_current();
+  //enter critical section
+  old_level = intr_disable();
 
-  ASSERT (is_thread (t));
-
-  old_level = intr_disable ();
-  ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  ASSERT(is_thread (t));
+  ASSERT(t->status == THREAD_BLOCKED);
+  //find the position in ready list by priority from high to low
+  for(e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)){
+    struct thread* _thread = list_entry(e, struct thread, elem);
+    if(t->priority > _thread->priority){
+      break;
+    }
+  }
+  //insert the thread before e
+  list_insert(e, &t->elem);
   t->status = THREAD_READY;
+  //leave critical section
   intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -301,16 +327,40 @@ thread_exit (void)
 void
 thread_yield (void) 
 {
-  struct thread *cur = thread_current ();
-  enum intr_level old_level;
+  // struct thread *cur = thread_current ();
+  // enum intr_level old_level;
   
+  // ASSERT (!intr_context ());
+
+  //  old_level = intr_disable ();
+  // if (cur != idle_thread) 
+  //   list_push_back (&ready_list, &cur->elem);
+  // cur->status = THREAD_READY;
+  // schedule ();
+  // intr_set_level (old_level);
+
+  /*DonP sign*/
   ASSERT (!intr_context ());
 
+  struct list_elem* e = NULL;
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if(cur != idle_thread){
+    //find the position in sorted ready list from high to low 
+    for(e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)){
+      struct thread* _thread = list_entry(e, struct thread, elem);
+      if(cur->priority > _thread->priority){
+        break;
+      }      
+    }
+    list_insert(e, &cur->elem);
+  }
   cur->status = THREAD_READY;
-  schedule ();
+  //trigger context switching
+  schedule();
+  //leave critical section
   intr_set_level (old_level);
 }
 
@@ -335,7 +385,22 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  /*DonP sign*/
+  struct thread *cur = thread_current();
+  
+  ASSERT (!intr_context ());
+  //check valid
+  if((new_priority >= PRI_MIN) && (new_priority <= PRI_MAX)){
+    //modifie the base_priority
+    if(cur->base_priority != new_priority){
+      cur->base_priority = new_priority;
+    }
+    //recompute the effective 
+    cur->priority = cur->priority > cur->base_priority \
+                  ? cur->priority : cur->base_priority;
+    //thread_yield does the rest
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -467,6 +532,10 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+
+  /*DonP sign*/
+  t->base_priority = priority;
+  list_init(&t->lock_hold);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -582,4 +651,5 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
 

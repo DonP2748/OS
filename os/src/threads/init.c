@@ -118,7 +118,7 @@ main (void)
   exception_init ();
   syscall_init ();
 #endif
-
+  DEBUG("Before thread_Start\n");
   /* Start thread scheduler and enable interrupts. */
   thread_start ();
   serial_init_queue ();
@@ -130,10 +130,6 @@ main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
-
-  DEBUG("Before timer sleep testing\n");
-  timer_msleep(2000);
-  DEBUG("After timer sleep testing\n");
 
   printf ("Boot complete.\n");
   
