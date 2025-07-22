@@ -144,5 +144,8 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+/*DonP sign*/
+
+void thread_recompute_effective_priority(void);
 
 #endif /* threads/thread.h */

@@ -233,15 +233,6 @@ thread_block (void)
 void
 thread_unblock (struct thread *t) 
 {
-  // enum intr_level old_level;
-
-  // ASSERT (is_thread (t));
-
-  // old_level = intr_disable ();
-  // ASSERT (t->status == THREAD_BLOCKED);
-  // list_push_back (&ready_list, &t->elem);
-  // t->status = THREAD_READY;
-  // intr_set_level (old_level);
 
   /*DonP sign*/
 
@@ -327,17 +318,6 @@ thread_exit (void)
 void
 thread_yield (void) 
 {
-  // struct thread *cur = thread_current ();
-  // enum intr_level old_level;
-  
-  // ASSERT (!intr_context ());
-
-  //  old_level = intr_disable ();
-  // if (cur != idle_thread) 
-  //   list_push_back (&ready_list, &cur->elem);
-  // cur->status = THREAD_READY;
-  // schedule ();
-  // intr_set_level (old_level);
 
   /*DonP sign*/
   ASSERT (!intr_context ());
@@ -396,8 +376,7 @@ thread_set_priority (int new_priority)
       cur->base_priority = new_priority;
     }
     //recompute the effective 
-    cur->priority = cur->priority > cur->base_priority \
-                  ? cur->priority : cur->base_priority;
+    thread_recompute_effective_priority();
     //thread_yield does the rest
     thread_yield();
   }
@@ -407,7 +386,17 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  /*DonP sign*/
+  ASSERT (!intr_context ());
+
+  enum intr_level old_level;
+  
+  //enter critical section
+  old_level = intr_disable();
+  int priority = thread_current()->priority;
+  //leave critical section
+  intr_set_level (old_level);  
+  return priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -652,4 +641,33 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
+
+/*DonP sign*/
+
+void thread_recompute_effective_priority(void)
+{
+  enum intr_level old_level;
+  struct list_elem* e = NULL;
+  struct thread *cur = thread_current();
+  int max = cur->base_priority;
+
+  //enter critical section
+  old_level = intr_disable();
+  //searching for max
+  for(e = list_begin(&cur->lock_hold); e != list_end(&cur->lock_hold); e = list_next(e)){
+    struct lock* _lock = list_entry (e, struct lock, elem);
+    if(!list_empty (&_lock->semaphore.waiters)){
+      //waiters list has been already sorted, so check the front only
+      struct thread *waiter = list_entry(list_front(&_lock->semaphore.waiters),
+                                         struct thread, elem);
+      if(waiter->priority > max){
+        max = waiter->priority;
+      }
+    }
+  }
+  //leave critical section
+  intr_set_level(old_level);
+  //set effective priority with max
+  cur->priority = max;  
+}
 

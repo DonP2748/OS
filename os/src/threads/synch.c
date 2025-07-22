@@ -65,15 +65,6 @@ sema_down (struct semaphore *sema)
   ASSERT (sema != NULL);
   ASSERT (!intr_context ());
 
-  // old_level = intr_disable ();
-  // while (sema->value == 0) 
-  //   {
-  //     list_push_back (&sema->waiters, &thread_current ()->elem);
-  //     thread_block ();
-  //   }
-  // sema->value--;
-  // intr_set_level (old_level);
-
   /*DonP sign*/
   struct thread* cur = thread_current();
   struct list_elem *e = NULL;
@@ -222,17 +213,36 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  // sema_down (&lock->semaphore);
-  // lock->holder = thread_current ();
+  /*DonP sign*/  
 
-  /*DonP sign*/
+
   struct thread* cur = thread_current ();
+  
+  //wait for lock at this time
+  cur->lock_wait = lock;
+
   //enter critical section
   enum intr_level old_level = intr_disable();
   //handle inheritance priority / donation priority  
+  //H will run this code in case of L bock M block H
   if(lock->holder && (cur->priority > lock->holder->priority)){
+    //holder now is M
     struct thread *holder = lock->holder;
-    holder->priority = cur->priority;  //donate the priority
+    struct lock* nested_lock = lock;
+
+    //traverse through nested chain and boosts all other thread in chain to priority H
+    while(holder && (holder->priority < cur->priority)){
+      holder->priority = cur->priority;  //donate the priority
+      //check if M is waiting for other lock which may be held by L
+      nested_lock = holder->lock_wait;          //pass donation up the chain
+      if(nested_lock){
+        //holder now is L
+        holder = nested_lock->holder;
+      }
+      else{
+        break;
+      }
+    }
   }
   //release critical section
   intr_set_level(old_level);
@@ -240,8 +250,10 @@ lock_acquire (struct lock *lock)
   sema_down (&lock->semaphore);
 
   //cross reference
-  //we got the lock at this time (if thread isn't blocked or takes the lock successful)
+  //we got the lock at this time
+  cur->lock_wait = NULL;
   lock->holder = cur;
+  list_push_back(&cur->lock_hold, &lock->elem);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -278,8 +290,11 @@ lock_release (struct lock *lock)
   /*DonP sign*/
 
   lock->holder = NULL;
-  struct thread* cur = thread_current();
-  cur->priority = cur->base_priority;
+  //remove the lock directly no need to go through thread list_hold anymore
+  //remove lock first 
+  list_remove(&lock->elem);  
+  //then refresh priority
+  thread_recompute_effective_priority();
   //actually give up the lock and allow preemption
   sema_up(&lock->semaphore);
 }
