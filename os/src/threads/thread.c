@@ -71,6 +71,11 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+
+/*DonP sign*/
+#include "fixed-point.h"
+static fixed_t load_avg;
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -98,6 +103,11 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
+  /*DonP sign*/
+  //init mlfq parameter for the first thread
+  initial_thread->nice = 0;
+  initial_thread->recent_cpu = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -132,6 +142,17 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+
+  /*DonP sign*/
+  if(thread_mlfqs){
+    //idle thread doesn't count recent_cpu
+    if(t != idle_thread){
+      //recent_cpu is fp type
+      t->recent_cpu = ADD_FP(t->recent_cpu, INT_TO_FP(1));
+      //update priority after change the recent_cpu
+      mlfqs_update_priority(t);
+    }    
+  }
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -197,10 +218,19 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  /* Add to run queue. */
-  thread_unblock (t);
 
   /*DonP sign*/
+  if(thread_mlfqs){ //mlfqs is enabled
+    //can't put these in init_thread() since it's used for thread_init() to create main thread also, need seperate init main thread and other thread anyway
+    t->recent_cpu = 0;  
+    //inherite current mlfq nice
+    t->nice = thread_get_nice();
+    //T is not in the queue yet, so can modify its priority
+    mlfqs_update_priority(t);
+  }
+  /* Add to run queue. */
+  thread_unblock (t);
+  //yield imediately
   thread_yield();
 
   return tid;
@@ -238,7 +268,6 @@ thread_unblock (struct thread *t)
 
   enum intr_level old_level;
   struct list_elem* e = NULL;
-  struct thread* cur = thread_current();
   //enter critical section
   old_level = intr_disable();
 
@@ -254,6 +283,8 @@ thread_unblock (struct thread *t)
   //insert the thread before e
   list_insert(e, &t->elem);
   t->status = THREAD_READY;
+  //update the current queue
+  t->in_queue = &ready_list;
   //leave critical section
   intr_set_level (old_level);
 
@@ -315,8 +346,7 @@ thread_exit (void)
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
-void
-thread_yield (void) 
+void thread_yield (void) 
 {
 
   /*DonP sign*/
@@ -338,6 +368,8 @@ thread_yield (void)
     list_insert(e, &cur->elem);
   }
   cur->status = THREAD_READY;
+  //update the current queue
+  cur->in_queue = &ready_list;
   //trigger context switching
   schedule();
   //leave critical section
@@ -368,7 +400,10 @@ thread_set_priority (int new_priority)
   /*DonP sign*/
   struct thread *cur = thread_current();
   
-  ASSERT (!intr_context ());
+  //can't modify priority manually if thread_mlfqs is enabled 
+  ASSERT(thread_mlfqs != true); 
+  ASSERT(!intr_context ());
+
   //check valid
   if((new_priority >= PRI_MIN) && (new_priority <= PRI_MAX)){
     //modifie the base_priority
@@ -383,11 +418,11 @@ thread_set_priority (int new_priority)
 }
 
 /* Returns the current thread's priority. */
-int
-thread_get_priority (void) 
+int thread_get_priority (void) 
 {
   /*DonP sign*/
-  ASSERT (!intr_context ());
+  //is safe to call thread_get_priority inside a interrupt context??? 
+  //ASSERT (!intr_context ()); 
 
   enum intr_level old_level;
   
@@ -400,34 +435,61 @@ thread_get_priority (void)
 }
 
 /* Sets the current thread's nice value to NICE. */
-void
-thread_set_nice (int nice UNUSED) 
+void thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+  /*DonP sign*/
+  struct thread *cur = thread_current();
+  enum intr_level old_level;
+  //enter critical section
+  old_level = intr_disable();
+  //update new thread nice and thread's priority
+  cur->nice = nice;
+  mlfqs_update_priority(cur);
+  //leave critical section
+  intr_set_level (old_level);      
+  thread_yield();  // Maybe let higher-priority thread run
 }
 
 /* Returns the current thread's nice value. */
-int
-thread_get_nice (void) 
+int thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  /*DonP sign*/
+  int _nice;
+  enum intr_level old_level;
+  //enter critical section
+  old_level = intr_disable();
+  _nice = thread_current()->nice;
+  //leave critical section
+  intr_set_level (old_level);    
+  return _nice;
 }
 
 /* Returns 100 times the system load average. */
-int
-thread_get_load_avg (void) 
+int thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  /*DonP sign*/
+  int _load_avg;
+  enum intr_level old_level;
+  //enter critical section
+  old_level = intr_disable();
+  _load_avg = FP_TO_INT_ROUND(MULT_FP(load_avg, INT_TO_FP(100)));
+  //leave critical section
+  intr_set_level(old_level);  
+  return _load_avg;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
-int
-thread_get_recent_cpu (void) 
+int thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  /*DonP sign*/
+  int _recent_cpu;
+  enum intr_level old_level;
+  //enter critical section
+  old_level = intr_disable();
+  _recent_cpu = FP_TO_INT_ROUND(MULT_FP(thread_current()->recent_cpu, INT_TO_FP(100)));
+  //leave critical section
+  intr_set_level(old_level);  
+  return _recent_cpu;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -515,7 +577,6 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
@@ -523,6 +584,7 @@ init_thread (struct thread *t, const char *name, int priority)
   intr_set_level (old_level);
 
   /*DonP sign*/
+  t->priority = priority;
   t->base_priority = priority;
   list_init(&t->lock_hold);
 }
@@ -671,3 +733,67 @@ void thread_recompute_effective_priority(void)
   cur->priority = max;  
 }
 
+
+//mlfq
+//all these api must run in critical section
+//run in context of systick interrupt, it has been already in critical section 
+void mlfqs_update_load_avg(void)
+{
+  int ready_list_sz = list_size(&ready_list);
+  int ready_threads = (thread_current() != idle_thread) ? (ready_list_sz+1) : ready_list_sz;
+  //load_avg = (59/60)*load_avg + (1/60)*ready_threads
+  //mult between two fixed point number, load_avg is already fixed_point
+  load_avg = MULT_FP(DIV_FP(INT_TO_FP(59), INT_TO_FP(60)), load_avg) \
+           + MULT_FP(DIV_FP(INT_TO_FP(1), INT_TO_FP(60)), INT_TO_FP(ready_threads));
+}
+//run in context of systick interrupt, it has been already in critical section 
+void mlfqs_update_recent_cpu(struct thread *t)
+{
+  if(t != idle_thread){
+    //coefficiency = (2*load_avg)/(2*load_avg + 1)
+    fixed_t coef = DIV_FP(MULT_FP(INT_TO_FP(2), load_avg),
+                          ADD_FP(MULT_FP(INT_TO_FP(2), load_avg), INT_TO_FP(1)));
+    //new recent_cpu = coefficiency*recent_cpu + nice
+    t->recent_cpu = ADD_FP(MULT_FP(coef, t->recent_cpu), INT_TO_FP(t->nice));
+  }
+}
+
+//all these api must run in critical section
+//run in context of systick interrupt, it has been already in critical section 
+void mlfqs_update_priority(struct thread *t)
+{
+  if(t != idle_thread){
+    int priority = SUB_FP(INT_TO_FP(PRI_MAX), DIV_FP(t->recent_cpu, INT_TO_FP(4)))
+                 - INT_TO_FP(t->nice * 2);
+    //recast fp to int
+    priority = FP_TO_INT_ROUND(priority);
+
+    if(t->priority > PRI_MAX){
+      t->priority = PRI_MAX;  
+    }
+    else if(t->priority < PRI_MIN){
+      t->priority = PRI_MIN; 
+    }
+    else{
+      t->priority = priority; 
+    }
+  }
+}
+//run in context of systick interrupt, it has been already in critical section 
+void mlfqs_update_recent_cpu_all(void)
+{
+  struct list_elem *e;
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)){
+    struct thread *t = list_entry(e, struct thread, allelem);
+    mlfqs_update_recent_cpu(t);
+  }
+}
+//run in context of systick interrupt, it has been already in critical section 
+void mlfqs_update_priority_all(void) 
+{
+  struct list_elem *e;
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)){
+    struct thread *t = list_entry(e, struct thread, allelem);
+    mlfqs_update_priority(t);
+  }
+}

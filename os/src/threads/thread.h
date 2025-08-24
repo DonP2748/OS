@@ -97,7 +97,13 @@ struct thread
     int base_priority;      //base priority for recompute effective and donation
     struct list lock_hold;  //list the lock held by thread
     struct lock* lock_wait; //lock the thread are waiting for
-
+    //reference to the current queue the thread is in, ready - blocked on locks/sema
+    //the queue need to be re-ordered everytime the thread change its effective priority
+    //then the queue refer is needed, should be updated whenever thread change to other queues and only used for priority donation     
+    struct list* in_queue;  
+    //mlfq
+    int nice; //integer type  
+    int recent_cpu; //fixed point type 
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -147,5 +153,13 @@ int thread_get_load_avg (void);
 /*DonP sign*/
 
 void thread_recompute_effective_priority(void);
+//mlfq
+void mlfqs_update_load_avg(void);
+void mlfqs_update_recent_cpu(struct thread *t);
+void mlfqs_update_priority(struct thread *t);
+void mlfqs_update_recent_cpu_all(void);
+void mlfqs_update_priority_all(void); 
+
+
 
 #endif /* threads/thread.h */

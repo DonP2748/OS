@@ -31,6 +31,8 @@ static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
 /*DonP sign*/
+#define TIME_SLICE 4  
+
 #include "threads/malloc.h"
 
 typedef struct delayed_thread {
@@ -122,12 +124,12 @@ void timer_sleep (int64_t ticks)
     }
     //insert item before e
     list_insert(e,&(delayed->elem));
+    //update the current queue
+    delayed->thread->in_queue = &delay_list;
     //switch context
     thread_block();
     //free after thread is unblocked
     free(delayed);
-    //check interrupt level after wake up
-    DEBUG("Interrupt level: %d\n",intr_get_level() == INTR_ON);
     //exit critical section, MUST enable interrupt manually
     intr_enable();
   }
@@ -202,6 +204,7 @@ static void timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
   /*DonP sign*/
+  //handle delay/sleep
   if(!list_empty(&delay_list)){
     struct list_elem *e = NULL;
     //find the position in delay list to unblock, cover both empty and non-empty list case 
@@ -214,6 +217,18 @@ static void timer_interrupt (struct intr_frame *args UNUSED)
       else{
         break;
       }
+    }
+  }
+  //handle mlfq
+  if(thread_mlfqs == true){
+    //update load_avg and all recent_cpu for every 1 second
+    if(ticks % TIMER_FREQ == 0){
+      mlfqs_update_load_avg();
+      mlfqs_update_recent_cpu_all();
+    }
+    //update all priority for every 4 ticks
+    if(ticks % TIME_SLICE == 0){
+      mlfqs_update_priority_all();
     }
   }
 }

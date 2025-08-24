@@ -81,6 +81,8 @@ sema_down (struct semaphore *sema)
     }
     //insert cur before e
     list_insert(e, &cur->elem);
+    //update the current queue
+    cur->in_queue = &sema->waiters;
     thread_block();
   }
   sema->value--;
@@ -215,37 +217,50 @@ lock_acquire (struct lock *lock)
 
   /*DonP sign*/  
 
-
   struct thread* cur = thread_current ();
   
   //wait for lock at this time
   cur->lock_wait = lock;
 
-  //enter critical section
-  enum intr_level old_level = intr_disable();
-  //handle inheritance priority / donation priority  
-  //H will run this code in case of L bock M block H
-  if(lock->holder && (cur->priority > lock->holder->priority)){
-    //holder now is M
-    struct thread *holder = lock->holder;
-    struct lock* nested_lock = lock;
+  //thread_mlfqs should be disabled then priority inheritance is enabled
+  if(thread_mlfqs != true){
+    //enter critical section
+    enum intr_level old_level = intr_disable();
+    //handle inheritance priority / donation priority  
+    //H will run this code in case of L bock M block H
+    if(lock->holder && (cur->priority > lock->holder->priority)){
+      //holder now is M
+      struct thread *holder = lock->holder;
+      struct lock* nested_lock = lock;
 
-    //traverse through nested chain and boosts all other thread in chain to priority H
-    while(holder && (holder->priority < cur->priority)){
-      holder->priority = cur->priority;  //donate the priority
-      //check if M is waiting for other lock which may be held by L
-      nested_lock = holder->lock_wait;          //pass donation up the chain
-      if(nested_lock){
-        //holder now is L
-        holder = nested_lock->holder;
-      }
-      else{
-        break;
+      struct list_elem* e = NULL;
+      //traverse through nested chain and boosts all other thread in chain to priority H
+      while(holder && (holder->priority < cur->priority)){
+        holder->priority = cur->priority;  //donate the priority
+        //re-ordered the current queue of modified priority thread
+        list_remove(&holder->elem);
+        for(e = list_begin(holder->in_queue); e != list_end(holder->in_queue); e = list_next(e)){
+          struct thread* _thread = list_entry(e, struct thread, elem);
+          if(holder->priority > _thread->priority){
+            break;
+          }      
+        }
+        list_insert(e, &holder->elem);        
+        //check if M is waiting for other lock which may be held by L
+        nested_lock = holder->lock_wait;   //pass donation up the chain
+        if(nested_lock){
+          //holder now is L
+          holder = nested_lock->holder;
+        }
+        else{
+          break;
+        }
       }
     }
+    //release critical section
+    intr_set_level(old_level);    
   }
-  //release critical section
-  intr_set_level(old_level);
+
   //take the lock or blocked
   sema_down (&lock->semaphore);
 
@@ -292,9 +307,13 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   //remove the lock directly no need to go through thread list_hold anymore
   //remove lock first 
-  list_remove(&lock->elem);  
-  //then refresh priority
-  thread_recompute_effective_priority();
+  list_remove(&lock->elem);
+  
+  //thread_mlfqs should be disabled then priority inheritance is enabled
+  if(thread_mlfqs != true){  
+    //then refresh priority
+    thread_recompute_effective_priority();
+  }
   //actually give up the lock and allow preemption
   sema_up(&lock->semaphore);
 }
@@ -359,7 +378,31 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+
+  /*DonP sign*/
+
+  //enter critical section
+  struct list_elem* e = NULL;
+  struct thread* cur = thread_current ();
+  enum intr_level old_level = intr_disable();
+
+  for(e = list_begin(&cond->waiters); e != list_end(&cond->waiters); e = list_next(e)){
+    struct semaphore_elem* _sema = list_entry(e, struct semaphore_elem, elem);
+    //there is only one thread wait on sema waiters list, then sort the &cond->waiters
+    //by priority of each thread owned by each semaphore
+    struct thread* _thread = list_entry(list_front(&_sema->semaphore.waiters),
+                                        struct thread, elem);
+    //find e position  
+    if(cur->priority > _thread->priority){
+      break;
+    }      
+  }
+  //insert waiter.elem before e 
+  list_insert(e, &waiter.elem);
+
+  //release critical section
+  intr_set_level(old_level);
+
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
