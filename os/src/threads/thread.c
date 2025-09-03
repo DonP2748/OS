@@ -75,6 +75,7 @@ static tid_t allocate_tid (void);
 /*DonP sign*/
 #include "fixed-point.h"
 static fixed_t load_avg;
+static bool is_initialized = false;
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -705,6 +706,17 @@ uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
 
 /*DonP sign*/
+
+void thread_initialization_successfull(void)
+{
+  is_initialized = true;
+  DEBUG("Main thread is initialized successfull!\n");
+}
+
+bool thread_is_main_thread_initialized(void)
+{
+  return is_initialized;
+}
 
 void thread_recompute_effective_priority(void)
 {

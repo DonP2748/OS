@@ -10,7 +10,7 @@
 #include <syscall.h>
 #include "tests/lib.h"
 
-const char *test_name = "child-rox";
+//const char *test_name = "child-rox";
 
 static void
 try_write (void) 

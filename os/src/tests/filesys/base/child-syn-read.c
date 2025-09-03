@@ -11,7 +11,7 @@
 #include "tests/lib.h"
 #include "tests/filesys/base/syn-read.h"
 
-const char *test_name = "child-syn-read";
+//const char *test_name = "child-syn-read";
 
 static char buf[BUF_SIZE];
 

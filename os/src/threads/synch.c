@@ -136,7 +136,9 @@ sema_up (struct semaphore *sema)
 
   /*DonP sign*/
   //doesn't wait for tick interrupt but yield imediately since the lower priority thread can take the lock before tick interrupt occur (every 4 ticks) 
-  thread_yield();
+  if(thread_is_main_thread_initialized()){ //don't yield until main thread is initilized
+    thread_yield();
+  }
 }
 
 static void sema_test_helper (void *sema_);

@@ -153,6 +153,10 @@ int thread_get_load_avg (void);
 /*DonP sign*/
 
 void thread_recompute_effective_priority(void);
+
+bool thread_is_main_thread_initialized(void);
+void thread_initialization_successfull(void);
+
 //mlfq
 void mlfqs_update_load_avg(void);
 void mlfqs_update_recent_cpu(struct thread *t);

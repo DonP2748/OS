@@ -123,7 +123,6 @@ main (void)
   thread_start ();
   serial_init_queue ();
   timer_calibrate ();
-
 #ifdef FILESYS
   /* Initialize file system. */
   ide_init ();
@@ -131,6 +130,8 @@ main (void)
   filesys_init (format_filesys);
 #endif
 
+  /*DonP sign*/
+  thread_initialization_successfull();
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */

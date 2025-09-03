@@ -27,7 +27,7 @@
 static const int EXPECTED_DEPTH_TO_PASS = 30;
 static const int EXPECTED_REPETITIONS = 10;
 
-const char *test_name = "multi-oom";
+//const char *test_name = "multi-oom";
 
 enum child_termination_mode { RECURSE, CRASH };
 
