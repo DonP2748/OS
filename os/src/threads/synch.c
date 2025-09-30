@@ -123,21 +123,31 @@ sema_try_down (struct semaphore *sema)
 void
 sema_up (struct semaphore *sema) 
 {
+  /*DonP sign*/
   enum intr_level old_level;
-
+  struct thread* thread = NULL;
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  if (!list_empty (&sema->waiters)){
+    thread = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
+    thread_unblock (thread);
+  } 
+
   sema->value++;
   intr_set_level (old_level);
 
-  /*DonP sign*/
   //doesn't wait for tick interrupt but yield imediately since the lower priority thread can take the lock before tick interrupt occur (every 4 ticks) 
   if(thread_is_main_thread_initialized()){ //don't yield until main thread is initilized
-    thread_yield();
+    //yield if the current thread has lower priority
+    if((thread != NULL) && (thread->priority > thread_current()->priority)){
+      if(!intr_context()){ //safe if not in interrupt 
+        thread_yield();
+      }
+      else{ //safe if in interrupt
+        intr_yield_on_return();
+      }
+    }
   }
 }
 

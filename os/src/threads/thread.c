@@ -73,7 +73,6 @@ static tid_t allocate_tid (void);
 
 
 /*DonP sign*/
-#include "fixed-point.h"
 static fixed_t load_avg;
 static bool is_initialized = false;
 
@@ -587,7 +586,21 @@ init_thread (struct thread *t, const char *name, int priority)
   /*DonP sign*/
   t->priority = priority;
   t->base_priority = priority;
-  list_init(&t->lock_hold);
+  list_init(&t->lock_hold); 
+
+#ifdef USERPROG
+  //userprog 
+  if(t != initial_thread){ //if the thread isn't initial_thread 
+    t->parent = thread_current();
+  }
+  else{ //if the thread is initial_thread 
+    t->parent = NULL; 
+  }
+  t->cp = NULL;
+  t->exit_status = -1;
+  list_init(&t->children);
+#endif //USERPROG
+
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

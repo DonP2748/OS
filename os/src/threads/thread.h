@@ -4,6 +4,9 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+/*DonP sign*/
+#include "fixed-point.h"
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +26,19 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/*DonP sign*/
+struct child_proc
+{
+  tid_t tid;
+  int exit_status;
+  bool waited;            /* has parent already waited? */
+  bool load_success;      /* child reports loader result to parent */
+  struct semaphore wait_sema;  /* up when child exits */
+  struct semaphore load_sema;  /* up after load attempted */
+  struct list_elem elem;       /* in parent->children */
+};
+
 
 /* A kernel thread or user process.
 
@@ -103,11 +119,17 @@ struct thread
     struct list* in_queue;  
     //mlfq
     int nice; //integer type  
-    int recent_cpu; //fixed point type 
+    fixed_t recent_cpu; //fixed point type 
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    /*DonP sign*/
+    struct thread *parent; 
+    struct list children;
+    struct child_proc* cp;
+    int exit_status;
+    
 #endif
 
     /* Owned by thread.c. */

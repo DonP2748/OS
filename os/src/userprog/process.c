@@ -18,6 +18,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/*DonP sign*/
+#include "threads/malloc.h"
+
+static bool setup_stack_with_args (void **esp, const char *cmdline);
+
+
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -38,10 +45,50 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  /*DonP sign*/
+  //test strtok_r and use only for debug thread name
+  char prog_name[16];
+  strlcpy(prog_name, file_name, sizeof prog_name);
+  char *save_ptr;
+  //get only the first argument (e.g, echo)
+  char *first = strtok_r(prog_name, " \t", &save_ptr);
+  if(first == NULL){ 
+    strlcpy (prog_name, file_name, sizeof prog_name);
+  } 
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+
+  /*DonP sign*/
+  if(tid == TID_ERROR){
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+  /* Set up child_proc node and wait on load_sema. */
+  struct thread *cur = thread_current ();
+  struct child_proc *cp = malloc (sizeof *cp);
+  if(cp == NULL){
+    return TID_ERROR;  
+  } 
+  cp->tid = tid;
+  cp->exit_status = -1;
+  cp->waited = false;
+  cp->load_success = false;
+  sema_init (&cp->wait_sema, 0);
+  sema_init (&cp->load_sema, 0);
+  list_push_back (&cur->children, &cp->elem);
+
+  /* Pass pointer down by setting child->cp after thread_create via parent field later. */
+  /* We can't directly access child thread struct here, so we'll link in start_process. */
+  /* Wait until child attempts to load. */
+  sema_down (&cp->load_sema);
+
+  if (!cp->load_success) {
+    /* Child failed to load; remove node and free. */
+    list_remove (&cp->elem);
+    free (cp);
+    return TID_ERROR;
+  }
   return tid;
 }
 
@@ -50,21 +97,82 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
+  // char *file_name = file_name_;
+  // struct intr_frame if_;
+  // bool success;
+
+  // /* Initialize interrupt frame and load executable. */
+  // memset (&if_, 0, sizeof if_);
+  // if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+  // if_.cs = SEL_UCSEG;
+  // if_.eflags = FLAG_IF | FLAG_MBS;
+  // success = load (file_name, &if_.eip, &if_.esp);
+
+  // /* If load failed, quit. */
+  // palloc_free_page (file_name);
+  // if (!success) 
+  //   thread_exit ();
+
+  /*DonP sign*/
   char *file_name = file_name_;
   struct intr_frame if_;
-  bool success;
+  bool success = false;
 
-  /* Initialize interrupt frame and load executable. */
+  /* Make a private copy to tokenize. */
+  char *cmdline = palloc_get_page (0);
+  if (cmdline == NULL) thread_exit ();
+  strlcpy (cmdline, file_name, PGSIZE);
+
+  /* Tokenize to get program path. */
+  char *save_ptr;
+  char *prog = strtok_r (cmdline, " \t", &save_ptr);
+
+  /* Prepare page directory and CPU state. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  /* Load executable. */
+  success = prog != NULL && load (prog, &if_.eip, &if_.esp);
+    
+  /* Robust approach: find my cp in parent's children by tid. */
+  struct thread* cur = thread_current();
+  struct child_proc *cp = NULL;
+  if (cur->parent != NULL) {
+    struct list_elem *e;
+    for (e = list_begin (&cur->parent->children);
+         e != list_end (&cur->parent->children); e = list_next (e)) {
+      struct child_proc *it = list_entry (e, struct child_proc, elem);
+      if(it->tid == cur->tid){ 
+        cp = it; 
+        break; 
+      }
+    }
+  }
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  cur->cp = cp;
+  if (cp != NULL) {
+    cp->load_success = success;
+    sema_up (&cp->load_sema);
+  }
+
+  if (!success) {
+    palloc_free_page (cmdline);
+    palloc_free_page (file_name);
     thread_exit ();
+  }
+
+  /* Build user stack with full command line (argv). */
+  if(!setup_stack_with_args (&if_.esp, file_name)){  /* uses original full string */
+    if(cp){ 
+      cp->load_success = false; 
+    }
+    palloc_free_page (cmdline);
+    palloc_free_page (file_name);
+    thread_exit ();
+  }
+  palloc_free_page (cmdline);
+  palloc_free_page (file_name);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -74,6 +182,7 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -86,8 +195,31 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
+  /*DonP sign*/
+  struct thread* cur = thread_current();
+  struct list_elem* e = NULL;
+
+  //find cp by id
+  for(e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)){
+    struct child_proc* cp = list_entry(e, struct child_proc, elem);
+    if(cp->tid == child_tid){
+      if(cp->waited){
+        //already waited
+        return -1;
+      }
+      cp->waited = true;
+      //wait here until child exit
+      sema_down(&cp->wait_sema);
+      //wake up, collect child's exit status and clear child data
+      //no need to release child's resource since it was done by process_exit before
+      int status = cp->exit_status;
+      list_remove(&cp->elem);
+      free(cp);
+      return status;
+    }
+  }
   return -1;
 }
 
@@ -97,6 +229,13 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+  /*DonP sign*/
+  //process_exit will be called by thread_exit, then no need to call it manual
+  //call from kernel thread of child
+  if(cur->cp){
+    cur->cp->exit_status = cur->exit_status;
+    sema_up (&cur->cp->wait_sema);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -291,9 +430,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   read_bytes = 0;
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
+
               if (!load_segment (file, file_page, (void *) mem_page,
-                                 read_bytes, zero_bytes, writable))
+                                 read_bytes, zero_bytes, writable)){
                 goto done;
+              }
             }
           else
             goto done;
@@ -396,25 +537,36 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      /*DonP sign*/
+      /* Check if this upage is already mapped. */
+      uint8_t *kpage = pagedir_get_page (thread_current ()->pagedir, upage);
+      if(kpage == NULL){
+        /* Get a page of memory. */
+        uint8_t *kpage = palloc_get_page (PAL_USER);
+        if (kpage == NULL)
+          return false;
+        /* Load this page. */
+        if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (kpage);
-          return false; 
+            palloc_free_page (kpage);
+            return false; 
         }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+        memset (kpage + page_read_bytes, 0, page_zero_bytes);
+        
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
+        /* Add the page to the process's address space. */
+        if (!install_page (upage, kpage, writable)) 
         {
-          palloc_free_page (kpage);
-          return false; 
+            palloc_free_page (kpage);
+            return false; 
         }
+      }
+      else{
+        /* Page already exists → overlay segment data. */
+        if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+          return false;
+        memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      }
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -463,3 +615,83 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+/*DonP sign*/
+static bool setup_stack_with_args (void **esp, const char *cmdline) 
+{
+  // uint8_t *kpage;
+  // bool success = false;
+  // if ((kpage = palloc_get_page (PAL_USER | PAL_ZERO)) != NULL) {
+  //   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+  //   if (success)
+  //     *esp = PHYS_BASE;
+  //   else
+  //     palloc_free_page (kpage);
+  // }
+  // if (!success){
+  //   return false;
+  // } 
+
+  /* Tokenize cmdline into argv[] on a temporary array. */
+  char *buf = palloc_get_page (0);
+  if (!buf){
+    return false;
+  } 
+  strlcpy (buf, cmdline, PGSIZE);
+
+  char *argv[64];             /* supports up to 64 args; enlarge if needed */
+  int argc = 0;
+  char *save_ptr;
+  for (char *tok = strtok_r (buf, " \t", &save_ptr);
+       tok != NULL && argc < 64;
+       tok = strtok_r (NULL, " \t", &save_ptr)) {
+    argv[argc++] = tok;
+  }
+
+  /* 1) Push argument strings in reverse order. Record their user addresses. */
+  void *arg_addrs[64];
+  for (int i = argc - 1; i >= 0; --i) {
+    size_t len = strlen (argv[i]) + 1;               /* include '\0' */
+    *esp -= len;
+    memcpy (*esp, argv[i], len);
+    arg_addrs[i] = *esp;
+  }
+
+  /* 2) Word-align stack to 0 mod 4. */
+  uintptr_t mis = (uintptr_t)(*esp) % 4;
+  if (mis) {
+    *esp -= mis;
+    memset (*esp, 0, mis);
+  }
+
+  /* 3) Push a null sentinel for argv[argc]. */
+  *esp -= sizeof (char *);
+  memset (*esp, 0, sizeof (char *));
+
+  /* 4) Push pointers to each arg, argv[i]. */
+  for (int i = argc - 1; i >= 0; --i) {
+    *esp -= sizeof (char *);
+    memcpy (*esp, &arg_addrs[i], sizeof (char *));
+  }
+
+  /* 5) Push argv (i.e., &argv[0]). */
+  void *argv0 = *esp;
+  *esp -= sizeof (char **);
+  memcpy (*esp, &argv0, sizeof (char **));
+
+  /* 6) Push argc. */
+  *esp -= sizeof (int);
+  memcpy (*esp, &argc, sizeof (int));
+
+  /* 7) Fake return address. */
+  void *fake = 0;
+  *esp -= sizeof (void *);
+  memcpy (*esp, &fake, sizeof (void *));
+
+  palloc_free_page (buf);
+  return true;
+}
+
+
+
+
