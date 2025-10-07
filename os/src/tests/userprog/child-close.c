@@ -13,11 +13,12 @@
 #include <syscall.h>
 #include "tests/lib.h"
 
-//const char *test_name = "child-close";
+extern char *test_name;
 
 int
 main (int argc UNUSED, char *argv[]) 
 {
+  test_name = "child-close";
   msg ("begin");
   if (!isdigit (*argv[1]))
     fail ("bad command-line arguments");

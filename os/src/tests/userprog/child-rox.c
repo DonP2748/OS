@@ -10,11 +10,12 @@
 #include <syscall.h>
 #include "tests/lib.h"
 
-//const char *test_name = "child-rox";
+extern char *test_name;
 
 static void
 try_write (void) 
 {
+  test_name = "child-rox";
   int handle;
   char buffer[19];
 

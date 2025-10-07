@@ -57,7 +57,7 @@ process_execute (const char *file_name)
   } 
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
 
   /*DonP sign*/
   if(tid == TID_ERROR){
@@ -236,7 +236,6 @@ process_exit (void)
     cur->cp->exit_status = cur->exit_status;
     sema_up (&cur->cp->wait_sema);
   }
-
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -617,20 +616,10 @@ install_page (void *upage, void *kpage, bool writable)
 }
 
 /*DonP sign*/
+
+
 static bool setup_stack_with_args (void **esp, const char *cmdline) 
 {
-  // uint8_t *kpage;
-  // bool success = false;
-  // if ((kpage = palloc_get_page (PAL_USER | PAL_ZERO)) != NULL) {
-  //   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-  //   if (success)
-  //     *esp = PHYS_BASE;
-  //   else
-  //     palloc_free_page (kpage);
-  // }
-  // if (!success){
-  //   return false;
-  // } 
 
   /* Tokenize cmdline into argv[] on a temporary array. */
   char *buf = palloc_get_page (0);

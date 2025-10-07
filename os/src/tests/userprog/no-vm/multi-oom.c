@@ -27,7 +27,7 @@
 static const int EXPECTED_DEPTH_TO_PASS = 30;
 static const int EXPECTED_REPETITIONS = 10;
 
-//const char *test_name = "multi-oom";
+extern char *test_name;
 
 enum child_termination_mode { RECURSE, CRASH };
 
@@ -105,6 +105,9 @@ consume_some_resources_and_die (int seed)
 int
 main (int argc, char *argv[])
 {
+
+  test_name = "multi-oom";
+
   int n;
 
   n = argc > 1 ? atoi (argv[1]) : 0;

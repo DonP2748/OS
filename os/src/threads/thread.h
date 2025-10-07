@@ -28,6 +28,8 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 
 /*DonP sign*/
+#define FD_MAX  128 //[3-127] since 0 1 and 2 are reserved 
+
 struct child_proc
 {
   tid_t tid;
@@ -129,7 +131,7 @@ struct thread
     struct list children;
     struct child_proc* cp;
     int exit_status;
-    
+    struct file* fd_table[FD_MAX]; //fd table
 #endif
 
     /* Owned by thread.c. */
