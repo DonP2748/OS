@@ -15,7 +15,7 @@ extern char *test_name;
 static void
 try_write (void) 
 {
-  test_name = "child-rox";
+
   int handle;
   char buffer[19];
 
@@ -32,6 +32,7 @@ try_write (void)
 int
 main (int argc UNUSED, char *argv[]) 
 {
+  test_name = "child-rox";
   msg ("begin");
   try_write ();
 

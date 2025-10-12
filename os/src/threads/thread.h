@@ -131,7 +131,8 @@ struct thread
     struct list children;
     struct child_proc* cp;
     int exit_status;
-    struct file* fd_table[FD_MAX]; //fd table
+    struct file* executable;        //refer to executed file which is running
+    struct file* fd_table[FD_MAX];  //fd table
 #endif
 
     /* Owned by thread.c. */
