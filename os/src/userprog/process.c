@@ -120,7 +120,10 @@ start_process (void *file_name_)
 
   /* Make a private copy to tokenize. */
   char *cmdline = palloc_get_page (0);
-  if (cmdline == NULL) thread_exit ();
+  if (cmdline == NULL){
+    palloc_free_page (file_name);
+    thread_exit ();
+  } 
   strlcpy (cmdline, file_name, PGSIZE);
 
   /* Tokenize to get program path. */
@@ -148,6 +151,14 @@ start_process (void *file_name_)
         break; 
       }
     }
+    //reopen every file on parent side from child side
+    //duplicate parent's fds for child
+    for (int fd = 0; fd < FD_MAX; fd++) {
+      if (cur->parent->fd_table[fd] != NULL){
+        /* file_reopen increments refcount and returns a usable struct file* */
+        cur->fd_table[fd] = file_reopen(cur->parent->fd_table[fd]); 
+      }
+    }    
   }
 
   cur->cp = cp;
@@ -166,6 +177,7 @@ start_process (void *file_name_)
   if(!setup_stack_with_args (&if_.esp, file_name)){  /* uses original full string */
     if(cp){ 
       cp->load_success = false; 
+      sema_up (&cp->load_sema);
     }
     palloc_free_page (cmdline);
     palloc_free_page (file_name);
@@ -236,12 +248,21 @@ process_exit (void)
     cur->cp->exit_status = cur->exit_status;
     sema_up (&cur->cp->wait_sema);
   }
+  //close executed file
   if(cur->executable){
     //file_allow_write(cur->executable);
     file_close(cur->executable); //file_close has file_allow_write() already
     cur->executable = NULL;
   }
+  //close all opened fd in the table here
+  for (int fd = 0; fd < FD_MAX; fd++) {
+    if (cur->fd_table[fd] != NULL){
+      file_close(cur->fd_table[fd]); 
+      cur->fd_table[fd] = NULL;
+    }
+  }  
   
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

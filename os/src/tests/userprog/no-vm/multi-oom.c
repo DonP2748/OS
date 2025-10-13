@@ -150,12 +150,12 @@ main (int argc, char *argv[])
       /* If maximum depth is reached, return result. */
       if (child_pid == -1)
         return n;
-DEBUG("BEFORE wait N = %d\n", n);
+
       /* Else wait for child to report how deeply it was able to recurse. */
       int reached_depth = wait (child_pid);
       if (reached_depth == -1)
         fail ("wait returned -1.");
-if(is_at_root) DEBUG("ROOT WAKE UP\n");
+
       /* Record the depth reached during the first run; on subsequent
          runs, fail if those runs do not match the depth achieved on the
          first run. */
