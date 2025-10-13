@@ -133,6 +133,9 @@ struct thread
     int exit_status;
     struct file* executable;        //refer to executed file which is running
     struct file* fd_table[FD_MAX];  //fd table
+    //use to sync between parent and child when creating
+    //every thread can be a parent so this sema should be inside TCB instead of child_proc
+    struct semaphore parent_sema; 
 #endif
 
     /* Owned by thread.c. */

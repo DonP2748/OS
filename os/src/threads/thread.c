@@ -599,6 +599,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->cp = NULL;
   t->exit_status = -1;
   list_init(&t->children);
+  sema_init(&t->parent_sema, 0);
 #endif //USERPROG
 
 }

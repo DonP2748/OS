@@ -56,20 +56,23 @@ process_execute (const char *file_name)
     strlcpy (prog_name, file_name, sizeof prog_name);
   } 
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
-
-  /*DonP sign*/
-  if(tid == TID_ERROR){
-    palloc_free_page(fn_copy);
-    return TID_ERROR;
-  }
   /* Set up child_proc node and wait on load_sema. */
   struct thread *cur = thread_current ();
   struct child_proc *cp = malloc (sizeof *cp);
   if(cp == NULL){
     return TID_ERROR;  
   } 
+
+  /* Create a new thread to execute FILE_NAME. */
+  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
+
+  if(tid == TID_ERROR){
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+
+  //from now on, no parent's errors should be returned except from the child.
+  //since it may create an orphant process (child process has been created already)???  
   cp->tid = tid;
   cp->exit_status = -1;
   cp->waited = false;
@@ -77,6 +80,9 @@ process_execute (const char *file_name)
   sema_init (&cp->wait_sema, 0);
   sema_init (&cp->load_sema, 0);
   list_push_back (&cur->children, &cp->elem);
+
+  //signal the child that its data is set successful
+  sema_up(&cur->parent_sema);
 
   /* Pass pointer down by setting child->cp after thread_create via parent field later. */
   /* We can't directly access child thread struct here, so we'll link in start_process. */
@@ -118,30 +124,17 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success = false;
 
-  /* Make a private copy to tokenize. */
-  char *cmdline = palloc_get_page (0);
-  if (cmdline == NULL){
-    palloc_free_page (file_name);
-    thread_exit ();
-  } 
-  strlcpy (cmdline, file_name, PGSIZE);
-
-  /* Tokenize to get program path. */
-  char *save_ptr;
-  char *prog = strtok_r (cmdline, " \t", &save_ptr);
-
-  /* Prepare page directory and CPU state. */
-  memset (&if_, 0, sizeof if_);
-  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-  if_.cs = SEL_UCSEG;
-  if_.eflags = FLAG_IF | FLAG_MBS;
-  /* Load executable. */
-  success = prog != NULL && load (prog, &if_.eip, &if_.esp);
-    
+  //first, find child's parent and its meta data, otherwise, every exit without sema_up to parent 
+  //will lead to a deadlock (since parent still blocked now, then fail the multi-oom test case) 
+  
   /* Robust approach: find my cp in parent's children by tid. */
   struct thread* cur = thread_current();
   struct child_proc *cp = NULL;
+  //every process MUST have parent for 100% sure, otherwise, it will break the os theory
   if (cur->parent != NULL) {
+    //wait for parent to finish preparing the child data
+    sema_down(&cur->parent->parent_sema);
+    //wake up and find its data
     struct list_elem *e;
     for (e = list_begin (&cur->parent->children);
          e != list_end (&cur->parent->children); e = list_next (e)) {
@@ -160,29 +153,65 @@ start_process (void *file_name_)
       }
     }    
   }
+  //every process MUST have parent, then child's metadata inside parent MUST be found
+  cur->cp = cp; //cp must != NULL
 
-  cur->cp = cp;
+  //from now on, every failure MUST update status and wake_up the parent before exit
+  //if not, then the child may become a zomebie process since its data still existed 
+  //from the parent side
+
+  /* Make a private copy to tokenize. */
+  char *cmdline = palloc_get_page (0);
+  if (cmdline == NULL){
+    if (cp != NULL) {
+      cp->load_success = false;   //update load status to parent
+      sema_up (&cp->load_sema);   //must unblock parent before exit 
+    }    
+    palloc_free_page (file_name);
+    thread_exit ();
+  } 
+  strlcpy (cmdline, file_name, PGSIZE);
+
+  /* Tokenize to get program path. */
+  char *save_ptr;
+  char *prog = strtok_r (cmdline, " \t", &save_ptr);
+
+  /* Prepare page directory and CPU state. */
+  memset (&if_, 0, sizeof if_);
+  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+  if_.cs = SEL_UCSEG;
+  if_.eflags = FLAG_IF | FLAG_MBS;
+  /* Load executable. */
+  success = prog != NULL && load (prog, &if_.eip, &if_.esp);
+
+  if(success){ // if load success then setup stack
+    /* Build user stack with full command line (argv). */
+    if(!setup_stack_with_args (&if_.esp, file_name)){  /* uses original full string */   
+      //setup stack failed
+      if (cp != NULL) {
+        cp->load_success = false;
+        sema_up (&cp->load_sema);
+      }  
+      palloc_free_page (cmdline);
+      palloc_free_page (file_name);
+      thread_exit ();  
+    }
+  }
+  else{ // if load failed, no need to setup child process data anymore
+    if (cp != NULL) {
+      cp->load_success = false;
+      sema_up (&cp->load_sema);
+    }    
+    palloc_free_page (cmdline);
+    palloc_free_page (file_name);
+    thread_exit ();    
+  }
+
   if (cp != NULL) {
     cp->load_success = success;
     sema_up (&cp->load_sema);
   }
 
-  if (!success) {
-    palloc_free_page (cmdline);
-    palloc_free_page (file_name);
-    thread_exit ();
-  }
-
-  /* Build user stack with full command line (argv). */
-  if(!setup_stack_with_args (&if_.esp, file_name)){  /* uses original full string */
-    if(cp){ 
-      cp->load_success = false; 
-      sema_up (&cp->load_sema);
-    }
-    palloc_free_page (cmdline);
-    palloc_free_page (file_name);
-    thread_exit ();
-  }
   palloc_free_page (cmdline);
   palloc_free_page (file_name);
 
